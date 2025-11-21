@@ -203,42 +203,101 @@ git diff --cached --name-status | while read STATUS FILE; do
     esac
 done
 
-# 5. 确定提交信息(支持多行输入)
+# 5. 确定提交信息(使用编辑器)
 echo ""
 if [ -z "$COMMIT_MSG" ]; then
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}请输入提交信息 (Commit Message):${NC}"
     echo -e "${YELLOW}提示:${NC}"
-    echo "  - 按回车键换行继续输入下一行"
-    echo "  - 输入完成后,单独一行输入 ${GREEN}END${NC} 或 ${GREEN}end${NC} 结束"
-    echo "  - 或按 ${GREEN}Ctrl+D${NC} 结束输入"
-    echo "  - 直接 ${GREEN}Ctrl+D${NC}(空输入) 将使用默认提交信息"
+    echo "  - 将打开文本编辑器进行编辑"
+    echo "  - 支持完整的编辑功能(方向键、删除、复制粘贴等)"
+    echo "  - 编辑完成后保存并关闭编辑器"
+    echo "  - 空文件将使用默认提交信息"
     echo -e "${BLUE}========================================${NC}"
 
-    # 收集多行输入
-    COMMIT_LINES=()
-    LINE_COUNT=0
+    # 创建临时文件
+    TEMP_COMMIT_FILE=$(mktemp /tmp/git-commit-msg.XXXXXX)
 
-    while IFS= read -r line; do
-        # 检查是否是结束标记
-        if [[ "$line" =~ ^[eE][nN][dD]$ ]]; then
-            break
+    # 添加提示信息到临时文件
+    cat > "$TEMP_COMMIT_FILE" << 'EOF'
+# 请在上方输入提交信息
+#
+# 提示:
+#   - 第一行是简短的提交摘要(建议不超过50字符)
+#   - 空一行后可以写详细描述
+#   - 以 '#' 开头的行将被忽略
+#
+# 示例:
+# feat: 添加用户登录功能
+#
+# - 实现JWT认证
+# - 添加密码加密
+# - 增加登录日志
+EOF
+
+    # 确定使用的编辑器
+    if [ -n "$VISUAL" ]; then
+        EDITOR_CMD="$VISUAL"
+    elif [ -n "$EDITOR" ]; then
+        EDITOR_CMD="$EDITOR"
+    elif command -v nano &> /dev/null; then
+        EDITOR_CMD="nano"
+    elif command -v vim &> /dev/null; then
+        EDITOR_CMD="vim"
+    elif command -v vi &> /dev/null; then
+        EDITOR_CMD="vi"
+    else
+        EDITOR_CMD="cat"
+        echo -e "${YELLOW}⚠️  未找到文本编辑器,将使用简单输入模式${NC}"
+    fi
+
+    # 打开编辑器
+    echo -e "${GREEN}正在打开编辑器: $EDITOR_CMD${NC}"
+    echo ""
+
+    if [ "$EDITOR_CMD" = "cat" ]; then
+        # 降级方案:使用简单的多行输入
+        echo "请输入提交信息 (输入 :wq 或 :q! 结束):"
+        COMMIT_LINES=()
+        while IFS= read -r line; do
+            if [[ "$line" == ":wq" ]] || [[ "$line" == ":q!" ]]; then
+                break
+            fi
+            COMMIT_LINES+=("$line")
+        done
+        printf "%s\n" "${COMMIT_LINES[@]}" > "$TEMP_COMMIT_FILE"
+    else
+        $EDITOR_CMD "$TEMP_COMMIT_FILE"
+        EDIT_EXIT_CODE=$?
+
+        # 检查编辑器是否正常退出
+        if [ $EDIT_EXIT_CODE -ne 0 ]; then
+            echo -e "${RED}❌ 编辑器异常退出,操作已取消${NC}"
+            rm -f "$TEMP_COMMIT_FILE"
+            exit 1
         fi
-        COMMIT_LINES+=("$line")
-        ((LINE_COUNT++))
-    done
+    fi
 
-    # 合并所有行
-    if [ ${#COMMIT_LINES[@]} -eq 0 ]; then
+    # 读取并处理提交信息
+    # 移除注释行和空行
+    COMMIT_MSG=$(grep -v '^#' "$TEMP_COMMIT_FILE" | sed '/^$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # 清理临时文件
+    rm -f "$TEMP_COMMIT_FILE"
+
+    # 检查是否有有效内容
+    if [ -z "$COMMIT_MSG" ]; then
         COMMIT_MSG="Auto commit on $(date +'%Y-%m-%d %H:%M:%S')"
         echo ""
         echo -e "${YELLOW}⚠️  未输入提交信息,使用默认提交信息:${NC}"
         echo -e "${YELLOW}   $COMMIT_MSG${NC}"
     else
-        # 使用换行符连接所有行
-        COMMIT_MSG=$(printf "%s\n" "${COMMIT_LINES[@]}")
+        # 计算行数
+        LINE_COUNT=$(echo "$COMMIT_MSG" | wc -l)
         echo ""
         echo -e "${GREEN}✅ 已接收提交信息 (共 $LINE_COUNT 行)${NC}"
+        echo -e "${BLUE}预览:${NC}"
+        echo "$COMMIT_MSG" | sed 's/^/  /'
     fi
 fi
 
