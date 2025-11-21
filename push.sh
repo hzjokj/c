@@ -203,17 +203,42 @@ git diff --cached --name-status | while read STATUS FILE; do
     esac
 done
 
-# 5. 确定提交信息
+# 5. 确定提交信息(支持多行输入)
 echo ""
 if [ -z "$COMMIT_MSG" ]; then
+    echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}请输入提交信息 (Commit Message):${NC}"
-    read -r USER_INPUT_MSG
+    echo -e "${YELLOW}提示:${NC}"
+    echo "  - 按回车键换行继续输入下一行"
+    echo "  - 输入完成后,单独一行输入 ${GREEN}END${NC} 或 ${GREEN}end${NC} 结束"
+    echo "  - 或按 ${GREEN}Ctrl+D${NC} 结束输入"
+    echo "  - 直接 ${GREEN}Ctrl+D${NC}(空输入) 将使用默认提交信息"
+    echo -e "${BLUE}========================================${NC}"
 
-    if [ -z "$USER_INPUT_MSG" ]; then
+    # 收集多行输入
+    COMMIT_LINES=()
+    LINE_COUNT=0
+
+    while IFS= read -r line; do
+        # 检查是否是结束标记
+        if [[ "$line" =~ ^[eE][nN][dD]$ ]]; then
+            break
+        fi
+        COMMIT_LINES+=("$line")
+        ((LINE_COUNT++))
+    done
+
+    # 合并所有行
+    if [ ${#COMMIT_LINES[@]} -eq 0 ]; then
         COMMIT_MSG="Auto commit on $(date +'%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}⚠️  使用默认提交信息: $COMMIT_MSG${NC}"
+        echo ""
+        echo -e "${YELLOW}⚠️  未输入提交信息,使用默认提交信息:${NC}"
+        echo -e "${YELLOW}   $COMMIT_MSG${NC}"
     else
-        COMMIT_MSG="$USER_INPUT_MSG"
+        # 使用换行符连接所有行
+        COMMIT_MSG=$(printf "%s\n" "${COMMIT_LINES[@]}")
+        echo ""
+        echo -e "${GREEN}✅ 已接收提交信息 (共 $LINE_COUNT 行)${NC}"
     fi
 fi
 
@@ -235,6 +260,6 @@ if git push; then
     echo -e "${GREEN}🎉 推送成功! 代码已更新到远程仓库。${NC}"
     echo -e "${GREEN}============================================${NC}"
 else
-    echo -e "${RED}❌ 推送失败,请检查远程分支和网络连接。${NC}"
+    echo -e "${RED}❌推送失败,请检查远程分支和网络连接。${NC}"
     exit 1
 fi
